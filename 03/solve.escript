@@ -8,8 +8,10 @@ main(Args) ->
   Tokens = [string:tokens(W, ",") || W <- Wires],
   Sol =
     case Args of
-      ["2"] -> -1;
-      _ -> crosswires(Tokens)
+      ["2"] ->
+        crosswires(Tokens, fun(_, V1, V2) -> V1 + V2 end);
+      _ ->
+        crosswires(Tokens, fun({X, Y}, _V1, _V2) -> abs(X) + abs(Y) end)
     end,
   io:format("~w~n", [Sol]).
 
@@ -22,20 +24,25 @@ read_list(Pat, Acc) ->
     eof -> lists:reverse(Acc)
   end.
 
-crosswires(Tokens) ->
+crosswires(Tokens, Fun) ->
   [Tokens1, Tokens2] = Tokens,
-  Grid = #{coords => #{}, nearest => infinity},
-  NewGrid = lay(Tokens1, $1, Grid),
-  FinalGrid = lay(Tokens2, $2, NewGrid),
+  Grid =
+    #{ $1 => #{}
+     , $2 => #{}
+     , nearest => infinity
+     , nfun => Fun
+     },
+  NewGrid = lay(Tokens1, Grid#{color => $1}),
+  FinalGrid = lay(Tokens2, NewGrid#{color => $2}),
   #{nearest := D} = FinalGrid,
   D.
 
-lay(Tokens, S, Grid) ->
-  lay(Tokens, S, {0, 0}, Grid).
+lay(Tokens, Grid) ->
+  lay(Tokens, {0, 0}, Grid#{count => 1}).
 
-lay([], _, _, Grid) ->
+lay([], _, Grid) ->
   Grid;
-lay([Token|Rest], S, {X, Y}, Grid) ->
+lay([Token|Rest], {X, Y}, Grid) ->
   [D|LStr] = Token,
   L = list_to_integer(LStr),
   {Wire, NP} =
@@ -49,21 +56,37 @@ lay([Token|Rest], S, {X, Y}, Grid) ->
       $D ->
         {[{X, YY} || YY <- lists:seq(Y - 1, Y - L, -1)], {X, Y - L}}
     end,
-  NewGrid = update(Wire, S, Grid),
-  lay(Rest, S, NP, NewGrid).
+  NewGrid = update(Wire, Grid),
+  lay(Rest, NP, NewGrid).
 
-update([], _S, Grid) ->
+update([], Grid) ->
   Grid;
-update([{X, Y} = C|Rest], S, Grid) ->
-  #{coords := Cs, nearest := N} = Grid,
-  {NS, NN} =
-    case maps:get(C, Cs, S) =:= S of
-      true ->
-        {S, N};
-      false ->
-        {$X, min(N, abs(X) + abs(Y))}
+update([C|Rest], Grid) ->
+  #{ $1 := One
+   , $2 := Two
+   , color := S
+   , count := Count
+   , nearest := N
+   , nfun := NFun
+   } = Grid,
+  {Cs, Other} =
+    case S of
+      $1 -> {One, Two};
+      $2 -> {Two, One}
     end,
-  %%io:format("~c ~p ~p~n", [NS, C, NN]),
-  NC = Cs#{C => NS},
-  NewGrid = Grid#{coords => NC, nearest => NN},
-  update(Rest, S, NewGrid).
+  {NN, NCs} =
+    case {maps:get(C, Cs, no), maps:get(C, Other, no)} of
+      {no, no} ->
+        {N, Cs#{C => Count}};
+      {no, V2} ->
+        M = min(N, NFun(C, Count, V2)),
+        {M, Cs#{C => Count}};
+      {_, _} ->
+        {N, Cs}
+    end,
+  NewGrid =
+    case S of
+      $1 -> Grid#{$1 => NCs};
+      $2 -> Grid#{$2 => NCs}
+    end,
+  update(Rest, NewGrid#{nearest := NN, count => Count + 1}).
