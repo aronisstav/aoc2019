@@ -77,8 +77,99 @@ grid(#{pos := {X, Y} = Pos} = State) ->
 
 %%------------------------------------------------------------------------------
 
-fit(#{p := P}) ->
-  P ! {answer, 42}.
+fit(State) ->
+  %% The initial state must fit the ship
+  X = 99899, Line = ?LINE,
+  Y = 99899,
+  case fit(X, Y, State) of
+    false ->
+      io:format("ERROR: Tweak initial values L~p~n", [Line]),
+      erlang:halt();
+    true ->
+      ok
+  end,
+  fit(v, X, Y, State).
+
+fit(_, X, Y, _) when X < 0; Y < 0 -> error(eek);
+fit(D, X, Y, State) ->
+  Units = [10000, 1000, 100, 10, 1],
+  {NX, NY} = fit(D, X, Y, Units, State),
+  case {NX, NY} =/= {X, Y} of
+    true -> fit(other(D), NX, NY, State);
+    false ->
+      {OX, OY} = fit(other(D), X, Y, Units, State),
+      case {OX, OY} =/= {X, Y} of
+        true -> fit(D, OX, OY, State);
+        false ->
+          {DX, DY} = diag(X, Y, State),
+          case {DX, DY} =/= {X, Y} of
+            true -> fit(D, DX, DY, State);
+            false ->
+              #{p := P} = State,
+              print(X, Y, State),
+              P ! {answer, X * 10000 + Y}
+          end
+      end
+  end.
+
+fit(_D, X, Y, [], _State) -> {X, Y};
+fit(D, X, Y, [U|R] = Us, State) ->
+  {NX, NY} =
+    case D of
+      h -> {X - U, Y};
+      v -> {X, Y - U}
+    end,
+  case fit(NX, NY, State) of
+    true -> fit(D, NX, NY, Us, State);
+    false -> fit(D, X, Y, R, State)
+  end.
+
+fit(X, Y, _) when X < 0; Y < 0 -> false;
+fit(X, Y, State) ->
+  Ps = [{X, Y}, {X + 99, Y}, {X, Y + 99}],
+  Fun = fun({XX, YY}) -> pull(XX, YY, State) end,
+  lists:all(Fun, Ps).
+
+pull(X, Y, State) ->
+  #{robot := R} = State,
+  R ! X,
+  R ! Y,
+  receive
+    N -> N =:= 1
+  end.
+
+other(h) -> v;
+other(v) -> h.
+
+diag(X, Y, State) ->
+  {NX, NY} = {X - 1, Y - 1},
+  case fit(NX, NY, State) of
+    true -> {NX, NY};
+    false -> {X, Y}
+  end.
+
+%%------------------------------------------------------------------------------
+
+print(X, Y, State) ->
+    Xs = lists:seq(X - 20, X + 120),
+    Ys = lists:seq(Y - 20, Y + 120),
+    io:format("~p: ", [X - 100]),
+    print(Ys, Xs, Xs, X, Y, State).
+
+print([_], [], _, _, _, _) -> io:format("~n~n");
+print([Y|Ys], [], Xs, SX, SY, State) -> io:format("~n~p: ",[Y+1]), print(Ys, Xs, Xs, SX, SY, State);
+print([Y|_] = Ys, [X|RXs], Xs, SX, SY, State) ->
+  C =
+    case pull(X, Y, State) of
+      true ->
+        case X >= SX andalso X =< SX + 99 andalso Y >= SY andalso Y =< SY + 99 of
+          true -> $O;
+          false -> $#
+        end;
+      false -> $.
+    end,
+  io:format("~c", [C]),
+  print(Ys, RXs, Xs, SX, SY, State).
 
 %%------------------------------------------------------------------------------
 
